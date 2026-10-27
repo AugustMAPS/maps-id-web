@@ -115,9 +115,9 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--y);border-color:
 <p>Kode pesanan: <span class="code" id="pCode"></span><br><span class="small">Simpan kode ini untuk melacak pesanan.</span></p>
 <div class="qr"><img id="qrImg" alt="QRIS MAPS.ID"><p class="small" id="qrFallback"></p></div>
 <div class="tot"><span>Nominal</span><span id="pTotal"></span></div>
-<p class="small">Scan dengan aplikasi bank atau e-wallet, lalu tekan tombol di bawah. Admin akan memverifikasi pembayaranmu.</p>
-<button class="btn y" id="paidBtn">Saya sudah bayar</button>
-<button class="btn o" id="goTrack">Lacak pesanan ini</button></div>
+<p class="small">Scan dengan aplikasi bank atau e-wallet sesuai nominal. Tidak perlu menekan tombol apa pun: admin akan mencocokkan pembayaranmu dan pesanan langsung diproses.</p>
+<button class="btn y" id="goTrack">Lacak pesanan ini</button>
+<button class="btn o" id="again">Buat pesanan baru</button></div>
 </section>
 
 <!-- LACAK -->
@@ -136,7 +136,7 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--y);border-color:
 <div class="msg" id="aerr"></div>
 <button class="btn" id="loginBtn">Masuk</button></div>
 <div class="card hide" id="panel"><h2>Pesanan masuk</h2>
-<select id="filter"><option value="all">Semua</option><option value="unpaid">Belum bayar</option><option value="reported">Perlu verifikasi bayar</option><option value="active">Sedang dikerjakan</option><option value="done">Selesai</option></select>
+<select id="filter"><option value="all">Semua</option><option value="reported">Baru masuk</option><option value="active">Sedang dikerjakan</option><option value="done">Selesai</option></select>
 <div id="list"></div></div>
 </section>
 </main>
@@ -199,8 +199,8 @@ function show(v){
   window.scrollTo(0,0);
 }
 window.show=show;
-document.querySelectorAll('nav button').forEach(b=>b.addEventListener('click',()=>show(b.dataset.v)));
-$('goOrder').onclick=()=>show('order');
+document.querySelectorAll('nav button').forEach(b=>b.addEventListener('click',()=>{if(b.dataset.v==='order')openOrder();show(b.dataset.v)}));
+$('goOrder').onclick=()=>{openOrder();show('order')};
 
 /* ====== HITUNG HARGA ====== */
 function hitung(){
@@ -222,7 +222,7 @@ $('submitOrder').onclick=async()=>{
   const code='MAPS-'+Math.random().toString(36).slice(2,7).toUpperCase();
   const o={code,nama,wa,svc:$('svc').value,hal:+$('hal').value,rgk:+$('rgk').value,warna:$('wrn').value,
     jilid:$('jld').value==='1',kilat:$('kil').value==='1',amb:$('amb').value,file:$('file').value.trim(),
-    cat:$('cat').value.trim(),total:hitung(),pay:'unpaid',step:0,cancelled:false,createdAt:Date.now()};
+    cat:$('cat').value.trim(),total:hitung(),pay:'reported',step:0,cancelled:false,createdAt:Date.now()};
   $('submitOrder').disabled=true;
   try{await DB.add(o)}catch(e){console.error(e);$('oerr').textContent='Gagal menyimpan pesanan. Coba lagi.';$('submitOrder').disabled=false;return}
   $('submitOrder').disabled=false;
@@ -233,10 +233,15 @@ $('submitOrder').onclick=async()=>{
   $('qrImg').src=CFG.QRIS_IMG;
   window.scrollTo(0,0);
 };
-$('paidBtn').onclick=async()=>{
-  try{await DB.upd(cur.code,{pay:'reported'})}catch(e){toast('Gagal mengirim, coba lagi');return}
-  $('paidBtn').disabled=true;$('paidBtn').textContent='Menunggu verifikasi admin';
-};
+function resetOrder(){
+  ['nama','wa','file','cat'].forEach(i=>$(i).value='');
+  $('hal').value=10;$('rgk').value=1;$('svc').value='print';$('wrn').value='bw';
+  $('jld').value='0';$('kil').value='0';$('amb').value='ambil';
+  hitung();$('oerr').textContent='';cur=null;
+  $('payBox').classList.add('hide');$('orderForm').classList.remove('hide');
+}
+function openOrder(){if(!$('payBox').classList.contains('hide'))resetOrder()}
+$('again').onclick=()=>{resetOrder();window.scrollTo(0,0)};
 $('goTrack').onclick=()=>{$('kode').value=cur.code;show('track');cari()};
 
 /* ====== PELANGGAN: LACAK ====== */
@@ -247,18 +252,15 @@ async function cari(){
   let o=null;
   try{o=k&&await DB.get(k)}catch(e){console.error(e);$('terr').textContent='Gagal memuat data. Coba lagi.';return}
   if(!o){box.classList.add('hide');$('terr').textContent='Kode tidak ditemukan. Periksa kembali kodenya.';return}
-  const payTag={unpaid:['wr','Belum dibayar'],reported:['wr','Menunggu verifikasi'],paid:['ok','Lunas']}[o.pay]||['wr','-'];
+  const payTag={unpaid:['wr','Belum dibayar'],reported:['wr','Dibayar, menunggu dicek'],paid:['ok','Lunas']}[o.pay]||['wr','-'];
   box.classList.remove('hide');
   box.innerHTML=`<h2>${esc(o.code)}</h2>
   <p>${esc(o.nama)} · ${o.hal} hlm × ${o.rgk} · ${rp(o.total)}<br>
   ${o.cancelled?'<span class="tag er">Dibatalkan</span>':`<span class="tag ${payTag[0]}">${payTag[1]}</span>`}</p>
   <ul class="tl">${STEPS.map((s,i)=>`<li class="${i<o.step?'d':i===o.step&&o.step<5?'c':i===o.step?'d':''}">${s}</li>`).join('')}</ul>
   <div class="acts">
-  ${o.pay==='unpaid'&&!o.cancelled?`<button class="btn s" id="tPay">Saya sudah bayar</button><img src="${esc(CFG.QRIS_IMG)}" alt="QRIS" width="160">`:''}
-  ${o.step===4&&!o.cancelled?'<button class="btn s" id="tOk">Pesanan sudah saya terima</button>':''}
+  ${o.pay!=='paid'&&!o.cancelled?`<img src="${esc(CFG.QRIS_IMG)}" alt="QRIS" width="160">`:''}
   ${o.step===5?'<span class="tag ok">Terima kasih! Pesanan selesai.</span>':''}</div>`;
-  if($('tPay'))$('tPay').onclick=async()=>{await DB.upd(o.code,{pay:'reported'});cari()};
-  if($('tOk'))$('tOk').onclick=async()=>{await DB.upd(o.code,{step:5});cari()};
   clearTimeout(window._tt);
   window._tt=setTimeout(()=>{if(!$('v-track').classList.contains('hide'))cari()},8000);
 }
@@ -309,20 +311,18 @@ async function loadAdmin(){
   all=all.filter(o=>f==='all'||(f==='unpaid'&&o.pay==='unpaid'&&!o.cancelled)||(f==='reported'&&o.pay==='reported')||
     (f==='active'&&o.pay==='paid'&&o.step<5&&!o.cancelled)||(f==='done'&&o.step===5));
   $('list').innerHTML=all.length?all.map(o=>`<div class="ord">
-   <b>${esc(o.code)}</b> <span class="tag ${o.pay==='paid'?'ok':'wr'}">${o.pay==='paid'?'Lunas':o.pay==='reported'?'Klaim sudah bayar':'Belum bayar'}</span>
+   <b>${esc(o.code)}</b> <span class="tag ${o.pay==='paid'?'ok':'wr'}">${o.pay==='paid'?'Lunas':o.pay==='reported'?'Dibayar, cek mutasi':'Belum bayar'}</span>
    ${o.cancelled?'<span class="tag er">Batal</span>':''}<br>
    ${esc(o.nama)} · <a href="https://wa.me/${esc(String(o.wa).replace(/\D/g,'').replace(/^0/,'62'))}" target="_blank" rel="noopener">${esc(o.wa)}</a><br>
    <span class="small">${esc(o.svc)} · ${o.hal} hlm × ${o.rgk} · ${o.warna==='color'?'warna':'hitam putih'}${o.jilid?' · jilid':''}${o.kilat?' · kilat':''} · ${esc(o.amb)} · ${rp(o.total)}</span>
    ${o.file?`<br><a href="${esc(o.file)}" target="_blank" rel="noopener">Buka file</a>`:''}${o.cat?`<br><span class="small">Catatan: ${esc(o.cat)}</span>`:''}
    <br><span class="tag">Tahap: ${STEPS[o.step]}</span>
    <div class="acts">${o.cancelled||o.step===5?'':
-     `${o.pay!=='paid'?`<button class="btn s" data-a="pay" data-k="${esc(o.code)}">Verifikasi bayar</button>`:''}
-      ${o.pay==='paid'&&o.step<4?`<button class="btn s o" data-a="next" data-k="${esc(o.code)}">→ ${STEPS[o.step+1]}</button>`:''}
+     `${o.step<5?`<button class="btn s o" data-a="next" data-k="${esc(o.code)}">→ ${STEPS[o.step+1]}</button>`:''}
       <button class="btn s d" data-a="cancel" data-k="${esc(o.code)}">Batalkan</button>`}</div></div>`).join(''):'<p class="small">Belum ada pesanan.</p>';
   $('list').querySelectorAll('button').forEach(b=>b.onclick=async()=>{
     const o=await DB.get(b.dataset.k),a=b.dataset.a;if(!o)return;
-    if(a==='pay')await DB.upd(o.code,{pay:'paid',step:Math.max(o.step,1)});
-    if(a==='next')await DB.upd(o.code,{step:o.step+1});
+    if(a==='next')await DB.upd(o.code,o.step===0?{pay:'paid',step:1}:{step:o.step+1});
     if(a==='cancel'&&confirm('Batalkan pesanan '+o.code+'?'))await DB.upd(o.code,{cancelled:true});
     loadAdmin();
   });
@@ -349,7 +349,7 @@ $('fmtBtn').onclick=async()=>{
     out.innerHTML=R.map(([ok,t])=>`<div class="fr"><span class="tag ${ok?'ok':'er'}">${ok?'Sesuai':'Perbaiki'}</span><span>${esc(t)}</span></div>`).join('')+
       (R.every(x=>x[0])?'<p>Format sudah sesuai standar.</p>':'<button class="btn s" id="fmtGo">Pesan jasa rapikan format</button>')+
       '<p class="small">Pengecekan membaca pengaturan dasar dokumen. Isi bab dan daftar pustaka belum diperiksa.</p>';
-    if($('fmtGo'))$('fmtGo').onclick=()=>{$('svc').value='format';hitung();show('order')};
+    if($('fmtGo'))$('fmtGo').onclick=()=>{openOrder();$('svc').value='format';hitung();show('order')};
   }catch(e){console.error(e);out.innerHTML='<p class="msg">File tidak bisa dibaca. Pastikan formatnya .docx (bukan .doc atau PDF).</p>'}
 };
 })();
